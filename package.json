@@ -1,0 +1,39 @@
+{
+  "name": "github-architecture-generator",
+  "version": "1.0.0",
+  "description": "Generate architecture diagrams for GitHub repositories or local projects",
+  "type": "module",
+  "main": "dist/cli.js",
+  "bin": {
+    "github-arch": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "npm run clean && tsc",
+    "clean": "rm -rf dist",
+    "start": "node dist/cli.js",
+    "dev": "npm run build && npm run start --",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "github",
+    "architecture",
+    "diagram",
+    "generator"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.18.0",
+    "@octokit/rest": "^22.0.0",
+    "commander": "^12.0.0",
+    "dotenv": "^16.4.5",
+    "mermaid": "^10.8.0",
+    "openai": "^4.28.0",
+    "sharp": "^0.33.2"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.24",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.3.3"
+  }
+}
