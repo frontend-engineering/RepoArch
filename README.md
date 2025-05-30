@@ -25,17 +25,24 @@ npm install --save-dev github-architecture-generator
 
 ### CLI Usage
 
+# GitHub Architecture Generator
+## Usage
+### CLI Usage
+
 ```bash
-# Generate architecture diagrams for a repository
+# Generate architecture diagrams for a repository and export as Excalidraw format (default)
 github-arch generate --repo username/repo-name
 
-# Generate specific diagram types
+# Generate specific diagram types and export as Excalidraw format
 github-arch generate --repo username/repo-name --type functional
 github-arch generate --repo username/repo-name --type deployment
 
-# Output to specific format
+# Output to specific format, including Excalidraw
 github-arch generate --repo username/repo-name --output json
 github-arch generate --repo username/repo-name --output mermaid
+github-arch generate --repo username/repo-name --output svg
+github-arch generate --repo username/repo-name --output png
+github-arch generate --repo username/repo-name --output excalidraw
 ```
 
 ### SDK Usage

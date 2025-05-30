@@ -1,154 +1,143 @@
-import OpenAI from 'openai';
-import { Anthropic } from '@anthropic-ai/sdk';
-import { Diagram, Node, Edge } from '../types/index.js';
+import { Diagram, DiagramMetadata, Node, NodeMetadata, Edge, AIModelType, AIConfig } from '../types/index.js';
+import { AIInteractionService } from './AIInteractionService.js';
 
 export class AIService {
-  private openai?: OpenAI;
-  private anthropic?: Anthropic;
-  private model: string;
-  private apiKey: string;
+  private config: AIConfig;
+  private aiInteraction: AIInteractionService;
 
-  constructor(model: string, apiKey: string) {
-    this.model = model;
-    this.apiKey = apiKey;
-
-    if (model.startsWith('gpt')) {
-      this.openai = new OpenAI({ apiKey });
-    } else if (model.startsWith('claude')) {
-      this.anthropic = new Anthropic({ apiKey });
-    } else {
-      throw new Error(`Unsupported AI model: ${model}`);
-    }
+  constructor(config: AIConfig) {
+    this.config = config;
+    this.aiInteraction = new AIInteractionService(config);
   }
 
   async enhanceDiagram(diagram: Diagram, type: 'functional' | 'deployment'): Promise<Diagram> {
-    const prompt = this.generatePrompt(diagram, type);
-    let enhancedDiagram: Diagram;
+    console.log(`[AI Service] Starting diagram enhancement with ${this.config.type} model...`);
+    console.log(`[AI Service] Diagram type: ${type}`);
+    console.log(`[AI Service] Original diagram nodes: ${diagram.nodes.length}, edges: ${diagram.edges.length}`);
 
     try {
-      if (this.model.startsWith('gpt')) {
-        enhancedDiagram = await this.enhanceWithGPT(prompt);
-      } else if (this.model.startsWith('claude')) {
-        enhancedDiagram = await this.enhanceWithClaude(prompt);
-      } else {
-        throw new Error(`Unsupported AI model: ${this.model}`);
-      }
+      const startTime = Date.now();
 
-      // Merge the enhanced diagram with the original
+      // 准备仓库信息
+      const repoInfo = {
+        name: diagram.metadata?.name || 'Unknown Repository',
+        description: diagram.metadata?.description || '',
+        language: diagram.metadata?.language || 'TypeScript',
+        stars: diagram.metadata?.stars || 0,
+        forks: diagram.metadata?.forks || 0,
+        lastUpdated: diagram.metadata?.lastUpdated || new Date().toISOString(),
+        license: diagram.metadata?.license || 'Unknown'
+      };
+
+      // 调用 AI 分析
+      const response = await this.aiInteraction.analyzeArchitecture(
+        repoInfo,
+        diagram,
+        `分析类型: ${type === 'functional' ? '功能架构' : '部署架构'}`
+      );
+
+      // 解析响应
+      console.log('[AI Service] Parsing AI response...');
+      const enhancedDiagram = this.parseAIResponse(response.content);
+
+      const endTime = Date.now();
+      console.log(`[AI Service] Enhancement completed in ${(endTime - startTime) / 1000}s`);
+      console.log(`[AI Service] Enhanced diagram nodes: ${enhancedDiagram.nodes.length}, edges: ${enhancedDiagram.edges.length}`);
+
       return this.mergeDiagrams(diagram, enhancedDiagram);
     } catch (error) {
-      console.error('Error enhancing diagram with AI:', error);
-      return diagram; // Return original diagram if enhancement fails
+      console.error('[AI Service] Enhancement failed:', error);
+      console.log('[AI Service] Returning original diagram due to enhancement failure');
+      return diagram;
     }
   }
 
-  private generatePrompt(diagram: Diagram, type: 'functional' | 'deployment'): string {
-    const diagramJson = JSON.stringify(diagram, null, 2);
-    return `You are an expert software architect. Analyze the following ${type} architecture diagram and enhance it by:
-1. Identifying missing components and relationships
-2. Suggesting better component organization
-3. Adding descriptive labels and documentation
-4. Optimizing the visual layout
-5. Identifying potential architectural improvements
-
-Current diagram:
-${diagramJson}
-
-Please provide an enhanced version of this diagram in the same JSON format, with the following improvements:
-1. Add missing components that should logically exist
-2. Add missing relationships between components
-3. Improve component names and descriptions
-4. Add metadata about component responsibilities
-5. Suggest architectural patterns and best practices
-
-Return only the enhanced JSON diagram, maintaining the same structure but with improved content.`;
-  }
-
-  private async enhanceWithGPT(prompt: string): Promise<Diagram> {
-    if (!this.openai) throw new Error('OpenAI not initialized');
-    const response = await this.openai.chat.completions.create({
-      model: this.model,
-      messages: [
-        { role: 'system', content: 'You are an expert software architect.' },
-        { role: 'user', content: prompt }
-      ],
-      temperature: 0.7,
-      max_tokens: 2000
-    });
-
-    const content = response.choices[0]?.message?.content;
-    if (!content) {
-      throw new Error('No response from GPT model');
-    }
-
+  private parseAIResponse(content: string): Diagram {
     try {
-      return JSON.parse(content);
+      // 尝试提取 JSON 内容
+      const jsonMatch = content.match(/```json\n([\s\S]*?)\n```/) || 
+                       content.match(/{[\s\S]*}/);
+      
+      if (!jsonMatch) {
+        throw new Error('No valid JSON found in response');
+      }
+
+      const jsonStr = jsonMatch[1] || jsonMatch[0];
+      console.log('[AI Service] Extracted JSON:', jsonStr);
+      
+      const parsedData = JSON.parse(jsonStr);
+      return this.validateDiagramFormat(parsedData);
     } catch (error) {
-      console.error('Error parsing GPT response:', error);
-      throw new Error('Invalid response format from GPT model');
+      console.error('[AI Service] Error parsing AI response:', error);
+      throw new Error('Failed to parse JSON from response');
     }
   }
 
-  private async enhanceWithClaude(prompt: string): Promise<Diagram> {
-    if (!this.anthropic) throw new Error('Anthropic not initialized');
-    const response = await this.anthropic.messages.create({
-      model: this.model,
-      max_tokens: 2000,
-      messages: [
-        { role: 'user', content: prompt }
-      ]
-    });
-
-    // Claude v3 SDK returns content as array of ContentBlock, which may be text or tool_use
-    const contentBlock = response.content.find((block: any) => typeof (block as any).text === 'string');
-    const content = (contentBlock as any)?.text;
-    if (!content) {
-      throw new Error('No response from Claude model');
+  private validateDiagramFormat(data: any): Diagram {
+    console.log('[AI Service] Validating diagram format...');
+    
+    if (!data || typeof data !== 'object') {
+      throw new Error('Invalid diagram format: data is not an object');
     }
 
-    try {
-      return JSON.parse(content);
-    } catch (error) {
-      console.error('Error parsing Claude response:', error);
-      throw new Error('Invalid response format from Claude model');
+    if (!Array.isArray(data.nodes)) {
+      throw new Error('Invalid diagram format: nodes is not an array');
     }
+
+    if (!Array.isArray(data.edges)) {
+      throw new Error('Invalid diagram format: edges is not an array');
+    }
+
+    // 验证节点格式
+    for (const node of data.nodes) {
+      if (!node.id || !node.label || !node.type) {
+        throw new Error('Invalid node format: missing required fields');
+      }
+    }
+
+    // 验证边格式
+    for (const edge of data.edges) {
+      if (!edge.id || !edge.source || !edge.target || !edge.type) {
+        throw new Error('Invalid edge format: missing required fields');
+      }
+    }
+
+    console.log('[AI Service] Diagram format validation passed');
+    return data as Diagram;
   }
 
   private mergeDiagrams(original: Diagram, enhanced: Diagram): Diagram {
-    // Create a map of existing nodes by ID
-    const nodeMap = new Map(original.nodes.map(node => [node.id, node]));
-    const edgeMap = new Map(original.edges.map(edge => [edge.id, edge]));
-
-    // Add new nodes from enhanced diagram
-    enhanced.nodes.forEach(node => {
-      if (!nodeMap.has(node.id)) {
-        nodeMap.set(node.id, node);
-      } else {
-        // Merge metadata if node exists
-        const existingNode = nodeMap.get(node.id)!;
-        nodeMap.set(node.id, {
-          ...existingNode,
-          description: (node as any).description || (existingNode as any).description,
-          metadata: { ...((existingNode as any).metadata || {}), ...((node as any).metadata || {}) }
-        });
+    console.log('[AI Service] Merging original and enhanced diagrams...');
+    
+    // 合并节点
+    const mergedNodes = [...original.nodes];
+    const existingNodeIds = new Set(original.nodes.map(n => n.id));
+    
+    for (const node of enhanced.nodes) {
+      if (!existingNodeIds.has(node.id)) {
+        mergedNodes.push(node);
       }
-    });
+    }
 
-    // Add new edges from enhanced diagram
-    enhanced.edges.forEach(edge => {
-      if (!edgeMap.has(edge.id)) {
-        edgeMap.set(edge.id, edge);
+    // 合并边
+    const mergedEdges = [...original.edges];
+    const existingEdgeIds = new Set(original.edges.map(e => e.id));
+    
+    for (const edge of enhanced.edges) {
+      if (!existingEdgeIds.has(edge.id)) {
+        mergedEdges.push(edge);
       }
-    });
+    }
 
+    console.log('[AI Service] Diagram merge completed');
     return {
-      nodes: Array.from(nodeMap.values()),
-      edges: Array.from(edgeMap.values()),
+      nodes: mergedNodes,
+      edges: mergedEdges,
       metadata: {
         ...original.metadata,
         enhanced: true,
         enhancedAt: new Date().toISOString(),
-        aiModel: this.model
+        aiModel: this.config.type
       }
     };
   }

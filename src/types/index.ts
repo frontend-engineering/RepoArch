@@ -1,28 +1,65 @@
 export interface Node {
   id: string;
   label: string;
-  type: 'module' | 'service' | 'component' | 'database' | 'external';
-  description?: string;
-  metadata?: Record<string, any>;
+  type: NodeType;
+  metadata: NodeMetadata;
+  edges?: Edge[];
+}
+
+export type NodeType = 'interface' | 'class' | 'function' | 'module' | 'service' | 'component' | 'database' | 'queue' | 'cache' | 'api' | 'file' | 'directory' | 'external';
+
+export interface NodeMetadata {
+  path?: string;
+  size?: number;
+  lastModified?: string;
+  sha?: string;
+  interfaces?: Interface[];
+  classes?: Class[];
+  functions?: Function[];
+  designPatterns?: string[];
+  methods?: Method[];
+  properties?: Property[];
+  extends?: string[];
+  implements?: string[];
+  parameters?: Parameter[];
+  returnType?: string;
+  isAsync?: boolean;
+  isExported?: boolean;
+  designPattern?: string | null;
 }
 
 export interface Edge {
   id: string;
   source: string;
   target: string;
-  label?: string;
-  type: 'depends' | 'uses' | 'implements' | 'extends';
-  metadata?: Record<string, any>;
+  type: EdgeType;
+  label: string;
+  metadata?: EdgeMetadata;
+}
+
+export type EdgeType = 'depends' | 'implements' | 'extends' | 'calls' | 'contains' | 'uses' | 'belongs' | 'connects';
+
+export interface EdgeMetadata {
+  type?: string;
+  source?: string;
+  sourcePath?: string;
+  targetPath?: string;
 }
 
 export interface DiagramMetadata {
-  type: 'functional' | 'deployment';
-  version: string;
-  generatedAt: string;
-  repository: string;
+  name?: string;
+  description?: string;
+  language?: string;
+  stars?: number;
+  forks?: number;
+  lastUpdated?: string;
+  license?: string;
   enhanced?: boolean;
   enhancedAt?: string;
-  aiModel?: string;
+  aiModel?: AIModelType;
+  version?: string;
+  analysisMethod?: string;
+  analysisSummary?: string;
 }
 
 export interface Diagram {
@@ -31,39 +68,81 @@ export interface Diagram {
   metadata: DiagramMetadata;
 }
 
+export type AIModelType = 'aliyun' | 'baidu' | 'gpt' | 'claude';
+
+export interface AIConfig {
+  type: AIModelType;
+  apiKey: string;
+  apiSecret?: string;  // 百度云需要
+  endpoint?: string;   // 阿里云需要
+}
+
 export interface GeneratorOptions {
+  type: 'functional' | 'deployment';
   token?: string;
-  excludePatterns?: string[];
-  includePatterns?: string[];
-  customStyles?: {
-    nodeColor?: string;
-    edgeColor?: string;
-    backgroundColor?: string;
-  };
-  aiModel?: string;
-  aiApiKey?: string;
   enableAI?: boolean;
+  aiConfig?: AIConfig;
+  includeTests?: boolean;
+  includeNodeModules?: boolean;
+  maxDepth?: number;
+  customStyles?: Record<string, any>;
+  excludePatterns?: string[];
 }
 
 export interface ExportOptions {
-  format: 'json' | 'mermaid' | 'svg' | 'png';
-  style?: {
-    theme?: 'default' | 'dark' | 'light';
-    customCss?: string;
-  };
+  format: 'mermaid' | 'json' | 'svg' | 'png' | 'excalidraw';
+  outputPath?: string;
+  customStyles?: Record<string, any>;
 }
 
-export interface GitHubConfig {
-  token: string;
-  aiModel: string;
-  aiApiKey: string;
-  enableAI: boolean;
-  diagramTypes: ('functional' | 'deployment')[];
-  outputFormats: ('json' | 'mermaid' | 'svg' | 'png')[];
-  excludePatterns: string[];
-  customStyles: {
-    nodeColor: string;
-    edgeColor: string;
-    backgroundColor: string;
-  };
+export interface Interface {
+  name: string;
+  extends: string[];
+  implements: string[];
+  methods: Method[];
+  properties: Property[];
+}
+
+export interface Class {
+  name: string;
+  extends: string | null;
+  implements: string[];
+  methods: Method[];
+  properties: Property[];
+  designPattern: string | null;
+}
+
+export interface Function {
+  name: string;
+  parameters: Parameter[];
+  returnType: string;
+  isAsync: boolean;
+  isExported: boolean;
+}
+
+export interface Method {
+  name: string;
+  returnType: string;
+  parameters: Array<{
+    name: string;
+    type: string;
+  }>;
+  visibility: 'public' | 'private' | 'protected';
+  isAsync?: boolean;
+}
+
+export interface Property {
+  name: string;
+  type: string;
+  visibility: 'public' | 'private' | 'protected';
+}
+
+export interface Parameter {
+  name: string;
+  type: string;
+}
+
+export interface Dependency {
+  path: string;
+  type: 'import' | 'require' | 'include';
 } 
