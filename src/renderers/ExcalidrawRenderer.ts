@@ -1,266 +1,321 @@
 // src/renderers/ExcalidrawRenderer.ts
 import { Diagram, Node, Edge, NodeType, EdgeType } from '../types/index.js';
-import { ExcalidrawElement, ExcalidrawTextElement, ExcalidrawLineElement } from '@excalidraw/excalidraw/types/element/types';
+import { ExcalidrawElement, ExcalidrawTextElement, ExcalidrawLineElement } from '../types/excalidraw.js';
 
 export class ExcalidrawRenderer {
   private readonly NODE_WIDTH = 200;
   private readonly NODE_HEIGHT = 100;
-  private readonly NODE_PADDING = 20;
-  private readonly LEVEL_HEIGHT = 200;
-  private readonly NODE_COLORS: Record<NodeType, string> = {
-    interface: '#FFB6C1', // LightPink
-    class: '#98FB98',     // PaleGreen
-    function: '#87CEEB',  // SkyBlue
-    module: '#DDA0DD',    // Plum
-    service: '#F0E68C',   // Khaki
-    component: '#E6E6FA', // Lavender
-    database: '#FFA07A',  // LightSalmon
-    queue: '#B0E0E6',     // PowderBlue
-    cache: '#FFE4B5',     // Moccasin
-    api: '#D8BFD8',       // Thistle
-    file: '#F5F5DC',      // Beige
-    directory: '#E0FFFF', // LightCyan
-    external: '#FFDAB9'   // PeachPuff
+  private readonly NODE_PADDING = 50;
+  private readonly LAYER_PADDING = 150;
+  private readonly HORIZONTAL_PADDING = 100;
+
+  // 节点类型到颜色的映射
+  private readonly NODE_COLORS: Partial<Record<NodeType, string>> = {
+    service: '#e6f3ff',
+    controller: '#fff0e6',
+    repository: '#f0ffe6',
+    model: '#ffe6e6',
+    util: '#f0e6ff',
+    config: '#e6fff0',
+    domain: '#e6f3ff',
+    external: '#f5f5f5',
+    database: '#ffe6e6',
+    component: '#f0e6ff',
+    module: '#e6fff0',
+    interface: '#fff0e6',
+    class: '#f0ffe6'
   };
 
-  private readonly EDGE_COLORS: Record<EdgeType, string> = {
-    depends: '#808080',   // Gray
-    implements: '#4B0082', // Indigo
-    extends: '#800080',   // Purple
-    calls: '#008000',     // Green
-    contains: '#000080',  // Navy
-    uses: '#800000',      // Maroon
-    belongs: '#008080',   // Teal
-    connects: '#000000'   // Black
+  // 边类型到颜色的映射
+  private readonly EDGE_COLORS: Partial<Record<EdgeType, string>> = {
+    call: '#666666',
+    dependency: '#999999',
+    inheritance: '#666666',
+    implementation: '#999999',
+    data: '#4a90e2',
+    event: '#50e3c2',
+    depends: '#999999',
+    uses: '#666666',
+    implements: '#999999',
+    extends: '#666666',
+    contains: '#999999'
+  };
+
+  // 架构层次定义
+  private readonly ARCHITECTURE_LAYERS = [
+    'core',           // 核心业务层
+    'application',    // 应用服务层
+    'interface',      // 接口适配层
+    'infrastructure', // 基础设施层
+    'external'        // 外部依赖层
+  ];
+
+  // 节点类型到架构层次的映射
+  private readonly NODE_TYPE_TO_LAYER: { [key: string]: string } = {
+    'domain': 'core',
+    'service': 'application',
+    'controller': 'interface',
+    'repository': 'infrastructure',
+    'util': 'infrastructure',
+    'config': 'infrastructure',
+    'external': 'external'
   };
 
   render(diagram: Diagram): ExcalidrawElement[] {
     const elements: ExcalidrawElement[] = [];
-    const nodePositions = this.calculateNodePositions(diagram.nodes);
+    
+    // 1. 对节点进行分层
+    const layeredNodes = this.groupNodesByLayer(diagram.nodes);
+    console.log('layer nodes: ', layeredNodes);
+    
+    // 2. 计算每层节点的位置
+    const nodePositions = this.calculateLayeredPositions(layeredNodes);
+    console.log('node positions: ', nodePositions);
 
-    // 渲染节点
-    diagram.nodes.forEach((node, index) => {
-      const position = nodePositions[index];
+    // 3. 渲染节点
+    diagram.nodes.forEach(node => {
+      const position = nodePositions.get(node.id);
+      console.log('get position: ', position);
       if (position) {
         const nodeElements = this.createNodeElements(node, position);
         elements.push(...nodeElements);
       }
     });
 
-    // 渲染边
+    // 4. 渲染边
     diagram.edges.forEach(edge => {
-      const sourceIndex = diagram.nodes.findIndex(n => n.id === edge.source);
-      const targetIndex = diagram.nodes.findIndex(n => n.id === edge.target);
+      const sourcePosition = nodePositions.get(edge.source);
+      const targetPosition = nodePositions.get(edge.target);
       
-      if (sourceIndex !== -1 && targetIndex !== -1) {
-        const sourcePosition = nodePositions[sourceIndex];
-        const targetPosition = nodePositions[targetIndex];
-        
-        if (sourcePosition && targetPosition) {
-          const edgeElements = this.createEdgeElements(edge, sourcePosition, targetPosition);
-          elements.push(...edgeElements);
-        }
+      if (sourcePosition && targetPosition) {
+        const edgeElements = this.createEdgeElements(edge, sourcePosition, targetPosition);
+        elements.push(...edgeElements);
       }
     });
 
     return elements;
   }
 
-  private calculateNodePositions(nodes: Node[]): { x: number; y: number }[] {
-    const positions: { x: number; y: number }[] = [];
-    const levels = this.calculateNodeLevels(nodes);
-    const maxNodesInLevel = Math.max(...Object.values(levels).map(nodes => nodes.length));
+  private groupNodesByLayer(nodes: Node[]): Map<string, Node[]> {
+    const layeredNodes = new Map<string, Node[]>();
+    
+    // 初始化层
+    this.ARCHITECTURE_LAYERS.forEach(layer => {
+      layeredNodes.set(layer, []);
+    });
 
-    Object.entries(levels).forEach(([level, levelNodes], levelIndex) => {
-      const y = levelIndex * this.LEVEL_HEIGHT;
-      const totalWidth = levelNodes.length * (this.NODE_WIDTH + this.NODE_PADDING);
-      const startX = -totalWidth / 2;
+    // 将节点分配到对应的层
+    nodes.forEach(node => {
+      const layer = this.determineNodeLayer(node);
+      const layerNodes = layeredNodes.get(layer) || [];
+      layerNodes.push(node);
+      layeredNodes.set(layer, layerNodes);
+    });
 
-      levelNodes.forEach((node, index) => {
-        positions.push({
-          x: startX + index * (this.NODE_WIDTH + this.NODE_PADDING),
-          y
+    return layeredNodes;
+  }
+
+  private determineNodeLayer(node: Node): string {
+    // 1. 首先检查节点的类型
+    const typeBasedLayer = this.NODE_TYPE_TO_LAYER[node.type];
+    if (typeBasedLayer) {
+      return typeBasedLayer;
+    }
+
+    // 2. 检查节点的元数据
+    if (node.metadata?.layer) {
+      return node.metadata.layer;
+    }
+
+    // 3. 根据节点的依赖关系推断
+    const hasExternalDependencies = node.metadata?.dependencies?.some(dep => 
+      dep.type === 'external' || dep.source === 'external'
+    );
+    if (hasExternalDependencies) {
+      return 'external';
+    }
+
+    // 4. 默认分配到应用服务层
+    return 'application';
+  }
+
+  private calculateLayeredPositions(layeredNodes: Map<string, Node[]>): Map<string, { x: number, y: number }> {
+    const positions = new Map<string, { x: number, y: number }>();
+    let currentY = 0;
+
+    // 从上到下处理每一层
+    this.ARCHITECTURE_LAYERS.forEach(layer => {
+      const nodes = layeredNodes.get(layer) || [];
+      if (nodes.length === 0) return;
+
+      // 计算当前层的节点水平排列
+      const totalWidth = nodes.length * (this.NODE_WIDTH + this.HORIZONTAL_PADDING) - this.HORIZONTAL_PADDING;
+      let currentX = -totalWidth / 2;
+
+      // 为当前层的每个节点分配位置
+      nodes.forEach(node => {
+        positions.set(node.id, {
+          x: currentX,
+          y: currentY
         });
+        currentX += this.NODE_WIDTH + this.HORIZONTAL_PADDING;
       });
+
+      // 移动到下一层
+      currentY += this.NODE_HEIGHT + this.LAYER_PADDING;
     });
 
     return positions;
   }
 
-  private calculateNodeLevels(nodes: Node[]): Record<number, Node[]> {
-    const levels: Record<number, Node[]> = {};
-    const visited = new Set<string>();
-    const queue: { node: Node; level: number }[] = [];
-
-    // 找到所有没有入边的节点作为起始点
-    const startNodes = nodes.filter(node => 
-      !nodes.some(n => n.edges?.some((e: Edge) => e.target === node.id))
-    );
-
-    startNodes.forEach(node => {
-      queue.push({ node, level: 0 });
-      visited.add(node.id);
-    });
-
-    while (queue.length > 0) {
-      const { node, level } = queue.shift()!;
-      
-      if (!levels[level]) {
-        levels[level] = [];
-      }
-      levels[level].push(node);
-
-      // 处理所有出边
-      node.edges?.forEach((edge: Edge) => {
-        const targetNode = nodes.find(n => n.id === edge.target);
-        if (targetNode && !visited.has(targetNode.id)) {
-          queue.push({ node: targetNode, level: level + 1 });
-          visited.add(targetNode.id);
-        }
-      });
-    }
-
-    return levels;
-  }
-
-  private createNodeElements(node: Node, position: { x: number; y: number }): ExcalidrawElement[] {
+  private createNodeElements(node: Node, position: { x: number, y: number }): ExcalidrawElement[] {
     const elements: ExcalidrawElement[] = [];
+    const backgroundColor = this.getNodeColor(node);
 
     // 创建节点背景
     const background: ExcalidrawElement = {
+      id: `node-${node.id}-bg`,
       type: 'rectangle',
       x: position.x,
       y: position.y,
       width: this.NODE_WIDTH,
       height: this.NODE_HEIGHT,
-      backgroundColor: this.NODE_COLORS[node.type],
-      strokeColor: '#000000',
-      strokeWidth: 2,
+      angle: 0,
+      backgroundColor,
+      strokeColor: '#666666',
+      strokeWidth: 1,
       fillStyle: 'solid',
       strokeStyle: 'solid',
       roughness: 1,
       opacity: 100,
-      groupIds: [node.id],
+      groupIds: [],
+      strokeSharpness: 'sharp',
       seed: Math.random(),
       version: 1,
-      versionNonce: Math.random()
+      versionNonce: 0,
+      isDeleted: false,
+      boundElements: [],
+      updated: Date.now(),
+      link: null,
+      locked: false
     };
     elements.push(background);
 
-    // 创建节点标签
-    const label: ExcalidrawTextElement = {
+    // 创建节点文本
+    const text: ExcalidrawTextElement = {
+      ...background,
+      id: `node-${node.id}-text`,
       type: 'text',
-      x: position.x + this.NODE_PADDING,
-      y: position.y + this.NODE_PADDING,
-      width: this.NODE_WIDTH - 2 * this.NODE_PADDING,
-      height: 20,
       text: node.label,
       fontSize: 16,
       fontFamily: 1,
       textAlign: 'center',
       verticalAlign: 'middle',
-      backgroundColor: 'transparent',
-      fillStyle: 'solid',
-      strokeWidth: 1,
-      strokeStyle: 'solid',
-      roughness: 1,
-      opacity: 100,
-      groupIds: [node.id],
-      seed: Math.random(),
-      version: 1,
-      versionNonce: Math.random()
+      baseline: 20
     };
-    elements.push(label);
-
-    // 创建节点类型标签
-    const typeLabel: ExcalidrawTextElement = {
-      type: 'text',
-      x: position.x + this.NODE_PADDING,
-      y: position.y + this.NODE_HEIGHT - this.NODE_PADDING - 20,
-      width: this.NODE_WIDTH - 2 * this.NODE_PADDING,
-      height: 20,
-      text: `[${node.type}]`,
-      fontSize: 12,
-      fontFamily: 1,
-      textAlign: 'center',
-      verticalAlign: 'middle',
-      backgroundColor: 'transparent',
-      fillStyle: 'solid',
-      strokeWidth: 1,
-      strokeStyle: 'solid',
-      roughness: 1,
-      opacity: 100,
-      groupIds: [node.id],
-      seed: Math.random(),
-      version: 1,
-      versionNonce: Math.random()
-    };
-    elements.push(typeLabel);
+    elements.push(text);
 
     return elements;
   }
 
-  private createEdgeElements(
-    edge: Edge,
-    sourcePosition: { x: number; y: number },
-    targetPosition: { x: number; y: number }
-  ): ExcalidrawElement[] {
+  private createEdgeElements(edge: Edge, source: { x: number, y: number }, target: { x: number, y: number }): ExcalidrawElement[] {
     const elements: ExcalidrawElement[] = [];
+    const color = this.getEdgeColor(edge);
 
     // 计算边的起点和终点
-    const startX = sourcePosition.x + this.NODE_WIDTH / 2;
-    const startY = sourcePosition.y + this.NODE_HEIGHT;
-    const endX = targetPosition.x + this.NODE_WIDTH / 2;
-    const endY = targetPosition.y;
+    const startX = source.x + this.NODE_WIDTH / 2;
+    const startY = source.y + this.NODE_HEIGHT;
+    const endX = target.x + this.NODE_WIDTH / 2;
+    const endY = target.y;
 
     // 创建边线
     const line: ExcalidrawLineElement = {
+      id: `edge-${edge.id}-line`,
       type: 'line',
       x: startX,
       y: startY,
-      width: endX - startX,
-      height: endY - startY,
-      strokeColor: this.EDGE_COLORS[edge.type],
-      strokeWidth: 2,
+      width: Math.abs(endX - startX),
+      height: Math.abs(endY - startY),
+      angle: 0,
+      points: [[0, 0], [endX - startX, endY - startY]],
+      lastCommittedPoint: [endX - startX, endY - startY],
+      startBinding: null,
+      endBinding: null,
+      startArrowhead: null,
+      endArrowhead: 'arrow',
+      strokeColor: color,
+      backgroundColor: 'transparent',
+      strokeWidth: 1,
+      fillStyle: 'solid',
       strokeStyle: 'solid',
       roughness: 1,
       opacity: 100,
-      groupIds: [edge.id],
+      groupIds: [],
+      strokeSharpness: 'sharp',
       seed: Math.random(),
       version: 1,
-      versionNonce: Math.random(),
-      points: [
-        [0, 0],
-        [endX - startX, endY - startY]
-      ]
+      versionNonce: 0,
+      isDeleted: false,
+      boundElements: [],
+      updated: Date.now(),
+      link: null,
+      locked: false
     };
     elements.push(line);
 
     // 创建边标签
-    const label: ExcalidrawTextElement = {
-      type: 'text',
-      x: (startX + endX) / 2 - 50,
-      y: (startY + endY) / 2 - 10,
-      width: 100,
-      height: 20,
-      text: edge.label,
-      fontSize: 12,
-      fontFamily: 1,
-      textAlign: 'center',
-      verticalAlign: 'middle',
-      backgroundColor: 'transparent',
-      fillStyle: 'solid',
-      strokeWidth: 1,
-      strokeStyle: 'solid',
-      roughness: 1,
-      opacity: 100,
-      groupIds: [edge.id],
-      seed: Math.random(),
-      version: 1,
-      versionNonce: Math.random()
-    };
-    elements.push(label);
+    if (edge.label) {
+      const labelX = (startX + endX) / 2;
+      const labelY = (startY + endY) / 2;
+      const label: ExcalidrawTextElement = {
+        id: `edge-${edge.id}-label`,
+        type: 'text',
+        x: labelX - 20,
+        y: labelY - 10,
+        width: 40,
+        height: 20,
+        angle: 0,
+        text: edge.label,
+        fontSize: 12,
+        fontFamily: 1,
+        textAlign: 'center',
+        verticalAlign: 'middle',
+        baseline: 12,
+        strokeColor: color,
+        backgroundColor: 'transparent',
+        strokeWidth: 1,
+        fillStyle: 'solid',
+        strokeStyle: 'solid',
+        roughness: 1,
+        opacity: 100,
+        groupIds: [],
+        strokeSharpness: 'sharp',
+        seed: Math.random(),
+        version: 1,
+        versionNonce: 0,
+        isDeleted: false,
+        boundElements: [],
+        updated: Date.now(),
+        link: null,
+        locked: false
+      };
+      elements.push(label);
+    }
 
     return elements;
+  }
+
+  private getNodeColor(node: Node): string {
+    return this.NODE_COLORS[node.type] || '#ffffff';
+  }
+
+  private getEdgeColor(edge: Edge): string {
+    return this.EDGE_COLORS[edge.type] || '#666666';
+  }
+
+  private getDependencies(node: Node): string[] {
+    return (node.metadata?.dependencies || []).map(dep => 
+      typeof dep === 'string' ? dep : dep.source
+    );
   }
 }

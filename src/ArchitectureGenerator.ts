@@ -1,12 +1,12 @@
 import { Octokit } from '@octokit/rest';
-import { Diagram, GeneratorOptions, ExportOptions, Node, Edge, NodeType, EdgeType } from './types/index.js';
+import { Diagram, GeneratorOptions, ExportOptions, Node, Edge, NodeType, EdgeType, DiagramMetadata, Interface, Class, Function, Method, Property, Parameter, Dependency } from './types/index.js';
 import { MermaidRenderer } from './renderers/MermaidRenderer.js';
 import { JsonRenderer } from './renderers/JsonRenderer.js';
 import { SvgRenderer } from './renderers/SvgRenderer.js';
 import { PngRenderer } from './renderers/PngRenderer.js';
 import { ExcalidrawRenderer } from './renderers/ExcalidrawRenderer.js';
 import * as fs from 'fs';
-import * as path from 'path';
+import path from 'path';
 import { execSync } from 'child_process';
 import { AIService } from './services/AIService.js';
 import { existsSync, lstatSync } from 'fs';
@@ -34,6 +34,9 @@ export class ArchitectureGenerator {
   private octokit: Octokit | null = null;
   private options: GeneratorOptions;
   private aiService?: AIService;
+  private nodes: Node[] = [];
+  private edges: Edge[] = [];
+  private metadata: DiagramMetadata = {};
 
   constructor(options: GeneratorOptions = { type: 'functional' }) {
     this.options = options;
@@ -107,7 +110,7 @@ export class ArchitectureGenerator {
         break;
       case 'excalidraw':
       default:
-        console.log('render excalidraw...');
+        console.log('render excalidraw...', diagram);
         const excalidrawElements = new ExcalidrawRenderer().render(diagram);
         content = JSON.stringify({ 
           type: 'excalidraw', 
@@ -274,40 +277,25 @@ export class ArchitectureGenerator {
     );
   }
 
-  private determineNodeType(path: string, type: string): Node['type'] {
-    const ext = path.split('.').pop()?.toLowerCase();
-    
-    if (type === 'deployment') {
-      if (path.includes('docker') || path.includes('container')) return 'service';
-      if (path.includes('database') || path.includes('db')) return 'database';
-      if (path.includes('api') || path.includes('service')) return 'service';
-      if (path.includes('client') || path.includes('frontend')) return 'component';
-      if (path.includes('external') || path.includes('third-party')) return 'external';
-      return 'service';
-    }
+  private determineNodeType(filePath: string): NodeType {
+    const ext = path.extname(filePath);
+    const fileName = path.basename(filePath, ext);
 
-    // Functional architecture
-    if (ext === 'ts' || ext === 'js' || ext === 'tsx' || ext === 'jsx') {
-      if (path.includes('service') || path.includes('api')) return 'service';
-      if (path.includes('component') || path.includes('ui')) return 'component';
-      if (path.includes('database') || path.includes('db')) return 'database';
-      if (path.includes('external') || path.includes('third-party')) return 'external';
-      return 'module';
-    }
+    if (fileName.includes('service')) return 'service';
+    if (fileName.includes('controller')) return 'controller';
+    if (fileName.includes('repository')) return 'repository';
+    if (fileName.includes('model')) return 'model';
+    if (fileName.includes('util')) return 'util';
+    if (fileName.includes('config')) return 'config';
+    if (fileName.includes('domain')) return 'domain';
+    if (fileName.includes('external')) return 'external';
+    if (fileName.includes('database')) return 'database';
+    if (fileName.includes('component')) return 'component';
+    if (fileName.includes('module')) return 'module';
+    if (fileName.includes('interface')) return 'interface';
+    if (fileName.includes('class')) return 'class';
 
-    if (ext === 'json' || ext === 'yaml' || ext === 'yml') {
-      if (path.includes('config') || path.includes('settings')) return 'module';
-      if (path.includes('database') || path.includes('db')) return 'database';
-      return 'module';
-    }
-
-    if (ext === 'md' || ext === 'txt') return 'module';
-    if (ext === 'css' || ext === 'scss' || ext === 'less') return 'component';
-    if (ext === 'html') return 'component';
-    if (ext === 'sql') return 'database';
-    if (ext === 'sh' || ext === 'bash') return 'service';
-
-    return 'module';
+    return 'service';
   }
 
   private async extractDependencies(owner: string, repo: string, path: string): Promise<string[]> {
@@ -434,7 +422,7 @@ export class ArchitectureGenerator {
     processedFiles.add(file.path);
 
     if (file.type === 'file') {
-      const nodeType = this.determineNodeType(file.path, 'functional');
+      const nodeType = this.determineNodeType(file.path);
       const node: Node = {
         id: file.path,
         label: file.name,
@@ -581,11 +569,13 @@ export class ArchitectureGenerator {
         label: class_.name,
         type: 'class',
         metadata: {
+          path: filePath,
           methods: class_.methods,
           properties: class_.properties,
-          extends: class_.extends ? [class_.extends] : undefined,
-          implements: class_.implements,
-          designPattern: class_.designPattern
+          classes: [class_],
+          designPatterns: class_.designPatterns,
+          extends: class_.extends ? [class_.extends] : [],
+          implements: class_.implements
         }
       };
       nodes.push(classNode);
@@ -722,7 +712,7 @@ export class ArchitectureGenerator {
         implements: implements_ ? implements_.split(',').map(i => i.trim()) : [],
         methods: this.extractMethods(body),
         properties: this.extractProperties(body),
-        designPattern: this.identifyClassDesignPattern(body)
+        designPatterns: []
       };
       classes.push(class_);
     }
@@ -736,17 +726,16 @@ export class ArchitectureGenerator {
     let match;
 
     while ((match = functionRegex.exec(content)) !== null) {
-      const name = match[1] || match[2];
-      const isAsync = content.slice(match.index - 6, match.index).includes('async');
-      const isExported = content.slice(match.index - 7, match.index).includes('export');
-      
-      functions.push({
+      const [_, name1, name2] = match;
+      const name = name1 || name2;
+      const func: Function = {
         name,
         parameters: this.extractParameters(match[0]),
-        returnType: this.extractReturnType(content, match.index),
-        isAsync,
-        isExported
-      });
+        returnType: 'any',
+        isAsync: match[0].includes('async'),
+        isExported: match[0].includes('export')
+      };
+      functions.push(func);
     }
 
     return functions;
@@ -758,14 +747,15 @@ export class ArchitectureGenerator {
     let match;
 
     while ((match = methodRegex.exec(body)) !== null) {
-      const visibility = body.slice(match.index - 10, match.index).match(/(public|private|protected)/)?.[1] || 'public';
-      methods.push({
-        name: match[1],
-        parameters: this.extractParameters(match[2]),
-        returnType: match[3]?.trim() || 'void',
-        visibility: visibility as 'public' | 'private' | 'protected',
-        isAsync: body.slice(match.index - 6, match.index).includes('async')
-      });
+      const [_, name, params, returnType] = match;
+      const method: Method = {
+        name,
+        parameters: this.extractParameters(params),
+        returnType: returnType?.trim() || 'void',
+        visibility: match[0].includes('private') ? 'private' : match[0].includes('protected') ? 'protected' : 'public',
+        isAsync: match[0].includes('async') || false
+      };
+      methods.push(method);
     }
 
     return methods;
@@ -777,12 +767,13 @@ export class ArchitectureGenerator {
     let match;
 
     while ((match = propertyRegex.exec(body)) !== null) {
-      const visibility = body.slice(match.index - 10, match.index).match(/(public|private|protected)/)?.[1] || 'public';
-      properties.push({
-        name: match[1],
-        type: match[2]?.trim() || 'any',
-        visibility: visibility as 'public' | 'private' | 'protected'
-      });
+      const [_, name, type] = match;
+      const property: Property = {
+        name,
+        type: type?.trim() || 'any',
+        visibility: match[0].includes('private') ? 'private' : match[0].includes('protected') ? 'protected' : 'public'
+      };
+      properties.push(property);
     }
 
     return properties;
@@ -794,22 +785,19 @@ export class ArchitectureGenerator {
       .filter(p => p)
       .map(p => {
         const [name, type] = p.split(':').map(s => s.trim());
-        return { name, type: type || 'any' };
+        return {
+          name,
+          type: type || 'any'
+        };
       });
-  }
-
-  private extractReturnType(content: string, functionStartIndex: number): string {
-    const returnTypeRegex = /:\s*([^{]+)/;
-    const match = content.slice(functionStartIndex).match(returnTypeRegex);
-    return match ? match[1].trim() : 'void';
   }
 
   private determineModuleType(analysis: CodeAnalysis): 'module' | 'service' | 'component' | 'database' | 'external' {
     // 根据代码分析结果确定模块类型
-    if (analysis.classes.some(c => c.designPattern === 'singleton' || c.designPattern === 'factory')) {
+    if (analysis.classes.some(c => c.designPatterns.includes('singleton') || c.designPatterns.includes('factory'))) {
       return 'service';
     }
-    if (analysis.classes.some(c => c.designPattern === 'observer' || c.designPattern === 'component')) {
+    if (analysis.classes.some(c => c.designPatterns.includes('observer') || c.designPatterns.includes('component'))) {
       return 'component';
     }
     if (analysis.classes.some(c => c.name.toLowerCase().includes('database') || c.name.toLowerCase().includes('db'))) {
@@ -860,6 +848,99 @@ export class ArchitectureGenerator {
     const patterns = this.identifyDesignPatterns(content);
     return patterns[0] || null;
   }
+
+  private createNodeFromFile(file: any): Node {
+    return {
+      id: file.path,
+      label: path.basename(file.path),
+      type: this.determineNodeType(file.path),
+      metadata: {
+        path: file.path,
+        size: file.size,
+        lastModified: file.lastModified,
+        sha: file.sha
+      }
+    };
+  }
+
+  private createNodeFromAnalysis(analysis: {
+    moduleName: string | null;
+    interfaces: Interface[];
+    classes: Class[];
+    functions: Function[];
+    dependencies: Dependency[];
+    designPatterns: string[];
+  }, filePath: string): Node {
+    const node: Node = {
+      id: filePath,
+      label: path.basename(filePath),
+      type: this.determineNodeType(filePath),
+      metadata: {
+        path: filePath,
+        interfaces: analysis.interfaces,
+        classes: analysis.classes,
+        functions: analysis.functions,
+        designPatterns: analysis.designPatterns || []
+      }
+    };
+
+    // Add interface nodes
+    analysis.interfaces?.forEach((interface_: Interface) => {
+      const interfaceNode: Node = {
+        id: `${filePath}#${interface_.name}`,
+        label: interface_.name,
+        type: 'interface',
+        metadata: {
+          path: filePath,
+          methods: interface_.methods,
+          properties: interface_.properties,
+          interfaces: [interface_],
+          extends: interface_.extends,
+          implements: interface_.implements
+        }
+      };
+      this.nodes.push(interfaceNode);
+    });
+
+    // Add class nodes
+    analysis.classes?.forEach((class_: Class) => {
+      const classNode: Node = {
+        id: `${filePath}#${class_.name}`,
+        label: class_.name,
+        type: 'class',
+        metadata: {
+          path: filePath,
+          methods: class_.methods,
+          properties: class_.properties,
+          classes: [class_],
+          designPatterns: class_.designPatterns,
+          extends: class_.extends ? [class_.extends] : [],
+          implements: class_.implements
+        }
+      };
+      this.nodes.push(classNode);
+    });
+
+    // Add function nodes
+    analysis.functions?.forEach((func: Function) => {
+      const functionNode: Node = {
+        id: `${filePath}#${func.name}`,
+        label: func.name,
+        type: 'util',
+        metadata: {
+          path: filePath,
+          parameters: func.parameters,
+          returnType: func.returnType,
+          isAsync: func.isAsync,
+          isExported: func.isExported,
+          functions: [func]
+        }
+      };
+      this.nodes.push(functionNode);
+    });
+
+    return node;
+  }
 }
 
 interface CodeAnalysis {
@@ -869,53 +950,4 @@ interface CodeAnalysis {
   functions: Function[];
   dependencies: Dependency[];
   designPatterns: string[];
-}
-
-interface Interface {
-  name: string;
-  extends: string[];
-  implements: string[];
-  methods: Method[];
-  properties: Property[];
-}
-
-interface Class {
-  name: string;
-  extends: string | null;
-  implements: string[];
-  methods: Method[];
-  properties: Property[];
-  designPattern: string | null;
-}
-
-interface Function {
-  name: string;
-  parameters: Parameter[];
-  returnType: string;
-  isAsync: boolean;
-  isExported: boolean;
-}
-
-interface Method {
-  name: string;
-  parameters: Parameter[];
-  returnType: string;
-  visibility: 'public' | 'private' | 'protected';
-  isAsync: boolean;
-}
-
-interface Property {
-  name: string;
-  type: string;
-  visibility: 'public' | 'private' | 'protected';
-}
-
-interface Parameter {
-  name: string;
-  type: string;
-}
-
-interface Dependency {
-  path: string;
-  type: 'import' | 'require' | 'include';
 } 

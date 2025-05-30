@@ -6,7 +6,20 @@ export interface Node {
   edges?: Edge[];
 }
 
-export type NodeType = 'interface' | 'class' | 'function' | 'module' | 'service' | 'component' | 'database' | 'queue' | 'cache' | 'api' | 'file' | 'directory' | 'external';
+export type NodeType = 
+  | 'service'
+  | 'controller'
+  | 'repository'
+  | 'model'
+  | 'util'
+  | 'config'
+  | 'domain'
+  | 'external'
+  | 'database'
+  | 'component'
+  | 'module'
+  | 'interface'
+  | 'class';
 
 export interface NodeMetadata {
   path?: string;
@@ -17,15 +30,19 @@ export interface NodeMetadata {
   classes?: Class[];
   functions?: Function[];
   designPatterns?: string[];
+  layer?: string;
+  dependencies?: Array<{
+    type: string;
+    source: string;
+  }>;
   methods?: Method[];
-  properties?: Property[];
-  extends?: string[];
-  implements?: string[];
   parameters?: Parameter[];
   returnType?: string;
   isAsync?: boolean;
   isExported?: boolean;
-  designPattern?: string | null;
+  properties?: Property[];
+  extends?: string[];
+  implements?: string[];
 }
 
 export interface Edge {
@@ -37,7 +54,18 @@ export interface Edge {
   metadata?: EdgeMetadata;
 }
 
-export type EdgeType = 'depends' | 'implements' | 'extends' | 'calls' | 'contains' | 'uses' | 'belongs' | 'connects';
+export type EdgeType = 
+  | 'call'
+  | 'dependency'
+  | 'inheritance'
+  | 'implementation'
+  | 'data'
+  | 'event'
+  | 'depends'
+  | 'uses'
+  | 'implements'
+  | 'extends'
+  | 'contains';
 
 export interface EdgeMetadata {
   type?: string;
@@ -109,7 +137,7 @@ export interface Class {
   implements: string[];
   methods: Method[];
   properties: Property[];
-  designPattern: string | null;
+  designPatterns: string[];
 }
 
 export interface Function {
